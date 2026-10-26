@@ -207,6 +207,17 @@ a{color:var(--primary);text-decoration:none}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 .ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 @media (max-width:360px){.page{padding-left:13px;padding-right:13px}.page-head h1{font-size:22px}.hero h2{font-size:20px}.stat b{font-size:16px}.brand b{font-size:14px}}
+
+.weather-bar{display:flex;align-items:center;gap:9px;margin-top:10px;padding:9px 11px;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 4px 14px rgba(24,73,61,.04)}
+.weather-bar.hide{display:none}
+.weather-bar .w-ic{width:24px;text-align:center;font-size:17px;line-height:1;flex:0 0 auto}
+.weather-bar .w-main{display:flex;align-items:baseline;gap:5px;min-width:0;flex:0 1 auto}
+.weather-bar .w-main b{font-size:13px;letter-spacing:-.2px;white-space:nowrap}
+.weather-bar .w-main span{font-size:8.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.weather-bar .w-sub{font-size:8px;color:var(--faint);margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42%}
+.weather-bar button{font-size:8px;font-weight:700;color:var(--primary);background:var(--soft);border-radius:8px;padding:5px 7px;white-space:nowrap;flex:0 0 auto}
+.city-input{width:132px;height:30px;border:1px solid var(--line);border-radius:9px;background:#fbfcfa;padding:0 8px;font-size:10px;color:var(--ink);text-align:right}
+.city-input:focus{outline:none;border-color:var(--soft2);background:#fff}
 </style>
 </head>
 <body>
@@ -263,6 +274,12 @@ a{color:var(--primary);text-decoration:none}
           <button class="hero-btn" data-action="add"><svg class="ic"><use href="#i-plus"></use></svg>录入课程</button>
         </div>
       </section>
+      <div class="weather-bar" id="weatherBar">
+        <span class="w-ic" id="weatherIcon">☁️</span>
+        <div class="w-main"><b id="weatherTemp">--°C</b><span id="weatherDesc">天气获取中…</span></div>
+        <span class="w-sub" id="weatherPlace">自动定位</span>
+        <button id="weatherRefresh">刷新</button>
+      </div>
       <div class="stats">
         <div class="stat"><span>本周课程</span><b id="statWeek">0 节</b><small id="statWeekFoot">0 门课程</small></div>
         <div class="stat"><span>今日安排</span><b id="statToday">0 节</b><small id="statTodayFoot">自由安排</small></div>
@@ -327,6 +344,13 @@ a{color:var(--primary);text-decoration:none}
         <div class="note" id="notifyNote">安卓版会使用系统通知在后台提醒；网页版需保持页面打开。</div>
       </div>
       <div class="card settings-card">
+        <div class="card-title">天气插件</div>
+        <div class="setting"><div><b>天气提醒</b><small>晨报和出发时带上天气</small></div><label class="switch"><input type="checkbox" id="weatherToggle"><span></span></label></div>
+        <div class="setting"><div><b>城市</b><small>留空自动定位，或填写城市名</small></div><input class="city-input" id="weatherCity" placeholder="自动定位"></div>
+        <div class="setting"><div><b>当前天气</b><small id="weatherState">未获取</small></div><button class="mini-btn" id="weatherRefresh2">刷新</button></div>
+        <div class="note">天气数据来自 Open-Meteo；自动定位使用 IP 粗略城市，可能受代理影响，不准时请填写城市。不发送课表，可随时关闭。</div>
+      </div>
+      <div class="card settings-card">
         <div class="card-title">数据与备份</div>
         <div class="action-grid">
           <button class="soft-btn" id="btnBackup"><svg class="ic"><use href="#i-copy"></use></svg>复制备份</button>
@@ -384,8 +408,8 @@ a{color:var(--primary);text-decoration:none}
   function uniqueNames(){var o={};state.courses.forEach(function(c){o[c.name]=1});return Object.keys(o).length}
 
   function loadState(){
-    var s={courses:[],settings:{morning:true,time:'07:00',lastBrief:''},messages:[]};
-    try{var raw=localStorage.getItem(KEY);if(raw){var p=JSON.parse(raw);if(p&&p.courses)s.courses=p.courses;if(p&&p.settings){s.settings.morning=p.settings.morning!==false;s.settings.time=p.settings.time||'07:00';s.settings.lastBrief=p.settings.lastBrief||''}if(p&&p.messages)s.messages=p.messages}}catch(e){}
+    var s={courses:[],settings:{morning:true,time:'07:00',lastBrief:'',weather:true,weatherCity:''},messages:[]};
+    try{var raw=localStorage.getItem(KEY);if(raw){var p=JSON.parse(raw);if(p&&p.courses)s.courses=p.courses;if(p&&p.settings){s.settings.morning=p.settings.morning!==false;s.settings.time=p.settings.time||'07:00';s.settings.lastBrief=p.settings.lastBrief||'';s.settings.weather=p.settings.weather!==false;s.settings.weatherCity=p.settings.weatherCity||''}if(p&&p.messages)s.messages=p.messages}}catch(e){}
     s.courses=(s.courses||[]).filter(function(c){return c&&c.day>=1&&c.day<=7&&c.name&&c.start});
     return s;
   }
@@ -404,6 +428,135 @@ a{color:var(--primary);text-decoration:none}
     var list=coursesOf(dayFromDate(today()));
     if(!list.length)return '今天没有课，给自己充充电吧。';
     return '今天有 '+list.length+' 节课，第一节课 '+list[0].start+' · '+list[0].name+'。';
+  }
+
+
+  // ---------------- Weather plugin ----------------
+  var WEATHER_KEY='campusButlerWeatherV1';
+  var weather={data:null,place:'',lat:null,lon:null,ts:0,loading:false,error:'',waiters:[]};
+  function weatherEnabled(){return state.settings.weather!==false}
+  function isWeatherQuery(s){return /天气|气温|下雨|带伞|冷不冷|热不热|weather|rain/i.test(s||'')}
+  function loadWeatherCache(){
+    try{var raw=localStorage.getItem(WEATHER_KEY);if(raw){var p=JSON.parse(raw);if(p&&p.data&&p.ts){weather.data=p.data;weather.place=p.place||'';weather.lat=p.lat;weather.lon=p.lon;weather.ts=p.ts}}}catch(e){}
+  }
+  function saveWeatherCache(){
+    try{localStorage.setItem(WEATHER_KEY,JSON.stringify({data:weather.data,place:weather.place,lat:weather.lat,lon:weather.lon,ts:weather.ts}))}catch(e){}
+  }
+  function weatherInfo(code){
+    if(code===0)return {t:'晴',i:'☀️'};
+    if(code<=3)return {t:'多云',i:'⛅'};
+    if(code===45||code===48)return {t:'有雾',i:'🌫️'};
+    if(code<=57)return {t:'毛毛雨',i:'🌦️'};
+    if(code<=67)return {t:'下雨',i:'🌧️'};
+    if(code<=77)return {t:'下雪',i:'🌨️'};
+    if(code<=82)return {t:'阵雨',i:'🌦️'};
+    if(code<=86)return {t:'阵雪',i:'🌨️'};
+    if(code>=95)return {t:'雷雨',i:'⛈️'};
+    return {t:'多云',i:'☁️'};
+  }
+  function weatherLine(){
+    if(!weatherEnabled()||!weather.data)return '';
+    var c=weather.data.current||{},d=weather.data.daily||{},info=weatherInfo(c.weather_code);
+    var min=d.temperature_2m_min&&d.temperature_2m_min[0],max=d.temperature_2m_max&&d.temperature_2m_max[0],rain=d.precipitation_probability_max&&d.precipitation_probability_max[0];
+    var temp=Math.round(c.temperature_2m);
+    return info.i+' '+weather.place+' '+temp+'°C · '+info.t+(max!=null?'，'+Math.round(min)+'~'+Math.round(max)+'°C':'')+(rain!=null?'，降雨 '+rain+'%':'');
+  }
+  function weatherAdvice(){
+    if(!weather.data)return '';
+    var d=weather.data.daily||{},min=d.temperature_2m_min&&d.temperature_2m_min[0],max=d.temperature_2m_max&&d.temperature_2m_max[0],rain=d.precipitation_probability_max&&d.precipitation_probability_max[0];
+    if(rain>=50)return '可能有雨，出门记得带伞。';
+    if(max>=30)return '天气偏热，注意防晒补水。';
+    if(min<=10)return '早晚偏凉，记得加件外套。';
+    return '天气不错，正常出行就好。';
+  }
+  function weatherReplyText(){
+    if(!weatherEnabled())return '天气插件已经关闭啦，可以在「设置 → 天气插件」里重新打开。';
+    if(!weather.data)return weather.loading?'☁️ 正在获取天气…':'天气暂时没获取到，可以稍后刷新，或在设置里填写城市。';
+    var c=weather.data.current||{},d=weather.data.daily||{},info=weatherInfo(c.weather_code);
+    var min=d.temperature_2m_min&&d.temperature_2m_min[0],max=d.temperature_2m_max&&d.temperature_2m_max[0],rain=d.precipitation_probability_max&&d.precipitation_probability_max[0];
+    return '🌤 '+weather.place+'\n当前 '+Math.round(c.temperature_2m)+'°C · '+info.t+'\n今日 '+Math.round(min)+'~'+Math.round(max)+'°C，降雨 '+rain+'%\n\n'+weatherAdvice();
+  }
+  function weatherJson(url){
+    return new Promise(function(resolve,reject){
+      var done=false,timer=setTimeout(function(){if(!done){done=true;reject(new Error('天气请求超时'))}},12000);
+      if(typeof fetch!=='function'){clearTimeout(timer);reject(new Error('当前浏览器不支持天气插件'));return}
+      fetch(url,{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('天气服务返回 '+r.status);return r.json()}).then(function(j){if(done)return;done=true;clearTimeout(timer);resolve(j)}).catch(function(e){if(done)return;done=true;clearTimeout(timer);reject(e)});
+    });
+  }
+  function resolveWeatherPlace(){
+    var city=(state.settings.weatherCity||'').trim();
+    if(city){
+      return weatherJson('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(city)+'&count=1&language=zh&format=json').then(function(j){
+        if(!j.results||!j.results.length)throw new Error('没有找到这个城市');
+        var p=j.results[0];
+        return {lat:p.latitude,lon:p.longitude,place:p.name+(p.admin1&&p.admin1!==p.name?' · '+p.admin1:'')};
+      });
+    }
+    return weatherJson('https://api.ip.sb/geoip').then(function(j){
+      if(!j||j.latitude==null)throw new Error('自动定位失败');
+      return {lat:j.latitude,lon:j.longitude,place:j.city||j.region||'当前位置'};
+    }).catch(function(){
+      return weatherJson('https://ipinfo.io/json').then(function(j){
+        if(!j||!j.loc)throw new Error('自动定位失败');
+        var p=String(j.loc).split(',');
+        return {lat:+p[0],lon:+p[1],place:j.city||j.region||'当前位置'};
+      });
+    }).catch(function(){
+      return weatherJson('https://geolocation-db.com/json/').then(function(j){
+        if(!j||j.latitude==null)throw new Error('自动定位失败，请在设置中填写城市');
+        return {lat:j.latitude,lon:j.longitude,place:j.city||j.state||'当前位置'};
+      });
+    });
+  }
+  function fetchWeather(lat,lon){
+    var url='https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon+'&current=temperature_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FShanghai&forecast_days=1';
+    return weatherJson(url);
+  }
+  function ensureWeather(force,cb){
+    if(!weatherEnabled()){weather.loading=false;weather.error='';renderWeather();if(cb)cb();return}
+    if(!force&&weather.data&&Date.now()-weather.ts<1800000){renderWeather();if(cb)cb();return}
+    if(weather.loading){if(cb)weather.waiters.push(cb);return}
+    weather.loading=true;weather.error='';renderWeather();
+    resolveWeatherPlace().then(function(p){
+      weather.lat=p.lat;weather.lon=p.lon;weather.place=p.place;
+      return fetchWeather(p.lat,p.lon);
+    }).then(function(data){
+      if(!data||!data.current)throw new Error('天气数据不完整');
+      weather.data=data;weather.ts=Date.now();saveWeatherCache();
+    }).catch(function(e){
+      weather.error=(e&&e.message)?e.message:'天气获取失败';
+    }).then(function(){
+      weather.loading=false;renderWeather();
+      var ws=weather.waiters;weather.waiters=[];
+      for(var i=0;i<ws.length;i++){try{ws[i]()}catch(e){}}
+      if(cb)cb();
+    });
+  }
+  function renderWeather(){
+    var bar=document.getElementById('weatherBar');
+    var icon=document.getElementById('weatherIcon'),temp=document.getElementById('weatherTemp'),desc=document.getElementById('weatherDesc'),place=document.getElementById('weatherPlace'),st=document.getElementById('weatherState');
+    if(!bar)return;
+    if(!weatherEnabled()){
+      bar.classList.add('hide');
+      if(st)st.textContent='已关闭';
+      return;
+    }
+    bar.classList.remove('hide');
+    if(weather.loading&&!weather.data){
+      if(icon)icon.textContent='☁️';if(temp)temp.textContent='--°C';if(desc)desc.textContent='天气获取中…';if(place)place.textContent='自动定位';if(st)st.textContent='获取中…';
+      return;
+    }
+    if(weather.data){
+      var c=weather.data.current||{},d=weather.data.daily||{},info=weatherInfo(c.weather_code);
+      var min=d.temperature_2m_min&&d.temperature_2m_min[0],max=d.temperature_2m_max&&d.temperature_2m_max[0],rain=d.precipitation_probability_max&&d.precipitation_probability_max[0];
+      if(icon)icon.textContent=info.i;if(temp)temp.textContent=Math.round(c.temperature_2m)+'°C';if(desc)desc.textContent=info.t;if(place)place.textContent=(state.settings.weatherCity?'':'自动 · ')+weather.place;
+      if(st)st.textContent='当前 '+Math.round(c.temperature_2m)+'°C · '+info.t+' · '+Math.round(min)+'~'+Math.round(max)+'°C · 降雨 '+rain+'%';
+      return;
+    }
+    if(icon)icon.textContent='☁️';if(temp)temp.textContent='--°C';if(desc)desc.textContent=weather.error||'天气暂不可用';if(place)place.textContent='设置城市';if(st)st.textContent=weather.error||'未获取';
+  }
+  function refreshWeather(){
+    ensureWeather(true,function(){toast(weather.data?'天气已更新':'天气获取失败，请检查城市或网络')});
   }
 
   // ---------------- Course parser ----------------
@@ -529,6 +682,7 @@ a{color:var(--primary);text-decoration:none}
   function brief(){
     var d=today(),list=coursesOf(dayFromDate(d)),lines=[];
     lines.push('🌅 早安，同学！今天是 '+dateCN(d));
+    var wline=weatherLine();if(wline)lines.push(wline);
     lines.push('');
     if(!list.length)lines.push('📚 今日课程：今天没有课，给自己充充电吧 ☕');
     else{
@@ -547,7 +701,7 @@ a{color:var(--primary);text-decoration:none}
     if(next){out.push('📚 接下来：'+next.start+' · '+next.name);out.push('📍 地点：'+next.location);var leave=minutes(next.start)-15;out.push(leave>nowMin?'⏰ 建议 '+pad(Math.floor(leave/60))+':'+pad(leave%60)+' 前出发，留足路上时间。':'⏰ 时间差不多啦，现在出发刚刚好！')}
     else if(list.length)out.push('📚 今天的课已经上完啦，回去路上注意安全～');
     else out.push('📚 今天没有课，是去自习吗？');
-    out.push('');out.push('✅ 书本、笔记本、笔袋');out.push('✅ 校园卡 / 水杯 / 充电宝');out.push('✅ 看一眼天气，带伞或加件外套');out.push('');out.push('路上慢一点，学长在课表这边等你～');
+    out.push('');out.push('✅ 书本、笔记本、笔袋');out.push('✅ 校园卡 / 水杯 / 充电宝');var wline=weatherLine();out.push(wline?'🌤 '+wline:'✅ 看一眼天气，带伞或加件外套');out.push('');out.push('路上慢一点，学长在课表这边等你～');
     return out.join('\n');
   }
   function nextClassReply(){
@@ -572,6 +726,7 @@ a{color:var(--primary);text-decoration:none}
   function processInput(raw){
     var input=String(raw||'').trim();if(!input)return {text:'我在听呢～把课程信息或想查的安排发给我就好 📚'};
     var s=normalize(input);
+    if(isWeatherQuery(s))return {text:weatherReplyText()};
     if(!/明天|明日/.test(s)&&(/早安|早上好|晨报|今日播报|今天有什么课|今天上什么课|今天上啥课|今日课程|今日安排|今天的课/.test(s)||s==='早'||s==='早呀'||s==='早啊'))return {text:brief(),brief:true};
     if(!/[?？]/.test(s)&&(/我要去上课|准备出门|去上课了|出发了|要出门|出门了|我要出门|去教室了/.test(s)))return {text:departure(),departure:true};
     if(/^(删除|删掉|移除|取消)/.test(s)){
@@ -627,6 +782,7 @@ a{color:var(--primary);text-decoration:none}
     renderToday();renderSchedule();renderSettings();
   }
   function renderToday(){
+    renderWeather();
     var now=today(),day=dayFromDate(now),list=coursesOf(day),hour=now.getHours();
     var greet=hour<6?'夜深了':hour<11?'早上好':hour<13?'中午好':hour<18?'下午好':'晚上好';
     $('#todayChip').textContent=weekdayLong(day);
@@ -653,6 +809,9 @@ a{color:var(--primary);text-decoration:none}
     var evs=target.querySelectorAll('tr[data-id]');Array.prototype.forEach.call(evs,function(tr){tr.onclick=function(){openCourse(tr.getAttribute('data-id'))}});
   }
   function renderSettings(){
+    $('#weatherToggle').checked=weatherEnabled();
+    $('#weatherCity').value=state.settings.weatherCity||'';
+    renderWeather();
     $('#morningToggle').checked=!!state.settings.morning;
     $('#reminderTime').value=state.settings.time||'07:00';
     $('#reminderTime').disabled=!state.settings.morning;
@@ -690,6 +849,7 @@ a{color:var(--primary);text-decoration:none}
   function sendChat(text){
     text=String(text||'').trim();if(!text)return;
     addMessage('user',text);
+    if(isWeatherQuery(text)){toast('正在获取天气…');ensureWeather(false,function(){addMessage('agent',weatherReplyText())});return}
     var r=processInput(text);
     addMessage('agent',r.text,r.table);
     if(r.brief)state.settings.lastBrief=dateKey(today());
@@ -748,7 +908,7 @@ a{color:var(--primary);text-decoration:none}
   function openRestore(){
     openSheet('<h3>粘贴备份恢复</h3><p class="sheet-sub">把之前复制的备份 JSON 粘贴进来，将替换当前课表。</p><div class="field"><textarea id="restoreText" placeholder="粘贴备份 JSON…"></textarea></div><div class="sheet-actions"><button class="btn secondary" onclick="window.__closeSheet()">取消</button><button class="btn" id="restoreGo">恢复</button></div>');
     $('#restoreGo').onclick=function(){
-      try{var p=JSON.parse($('#restoreText').value);if(!p||!p.courses)throw new Error('格式错误');state.courses=p.courses.filter(function(c){return c&&c.day&&c.name&&c.start});if(p.settings){state.settings.morning=p.settings.morning!==false;state.settings.time=p.settings.time||'07:00'}save();closeSheet();renderAll();toast('备份已恢复')}catch(e){toast('备份格式不正确')}
+      try{var p=JSON.parse($('#restoreText').value);if(!p||!p.courses)throw new Error('格式错误');state.courses=p.courses.filter(function(c){return c&&c.day&&c.name&&c.start});if(p.settings){state.settings.morning=p.settings.morning!==false;state.settings.time=p.settings.time||'07:00';state.settings.weather=p.settings.weather!==false;state.settings.weatherCity=p.settings.weatherCity||''}save();closeSheet();renderAll();toast('备份已恢复')}catch(e){toast('备份格式不正确')}
     };
   }
   function openInstallHelp(){
@@ -796,6 +956,10 @@ a{color:var(--primary);text-decoration:none}
   $$('.chip').forEach(function(c){c.onclick=function(){switchTab('chat');sendChat(c.getAttribute('data-chip'))}});
   $('#morningToggle').onchange=function(){state.settings.morning=this.checked;save();renderSettings();toast(this.checked?'每日晨报已开启':'每日晨报已关闭')};
   $('#reminderTime').onchange=function(){if(this.value){state.settings.time=this.value;save();toast('提醒时间已设为 '+this.value)}};
+  $('#weatherToggle').onchange=function(){state.settings.weather=this.checked;save();if(this.checked){ensureWeather(false)}else{weather.loading=false;renderWeather()}toast(this.checked?'天气插件已开启':'天气插件已关闭')};
+  $('#weatherCity').onchange=function(){state.settings.weatherCity=this.value.trim();weather.data=null;weather.ts=0;weather.place=state.settings.weatherCity||'';save();ensureWeather(true,function(){toast(weather.data?'天气城市已更新':'没有找到这个城市，请换个写法')})};
+  $('#weatherRefresh').onclick=refreshWeather;
+  $('#weatherRefresh2').onclick=refreshWeather;
   $('#btnNotify').onclick=function(){
     if(window.AndroidBridge&&AndroidBridge.requestNotificationPermission){AndroidBridge.requestNotificationPermission();toast('请在系统弹窗中允许通知');return}
     if('Notification'in window){Notification.requestPermission().then(function(p){toast(p==='granted'?'通知已开启':'未获得通知权限')})}else toast('当前浏览器不支持系统通知');
@@ -850,8 +1014,12 @@ a{color:var(--primary);text-decoration:none}
 
   // ---------------- boot ----------------
   if(params.get('demo')==='1')seedDemo();
+  var bootCity=params.get('city');
+  if(bootCity){state.settings.weatherCity=bootCity}
   if(!state.messages.length)state.messages=[{role:'agent',text:welcome()}];
+  loadWeatherCache();
   renderAll();renderChat();
+  ensureWeather(false);
   var bootTab=params.get('tab');
   if(bootTab&&document.getElementById('tab-'+bootTab))switchTab(bootTab);
   syncNative();
